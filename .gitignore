@@ -14,8 +14,14 @@ build/
 .AppleDouble
 .LSOverride
 
-# STL temp files
+# STL temp and test files
 temp_*.stl
+test_*.stl
+
+# Old/experiment files
+haring_photoroom_lamp.stl
+lamp_base.stl
+lamp_shade.stl
 
 # 3MF files (can be regenerated)
 *.3mf

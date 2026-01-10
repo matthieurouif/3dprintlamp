@@ -553,7 +553,6 @@ base_disk_trimesh = trimesh.Trimesh(
 shade_with_base = trimesh.util.concatenate([shade_mesh, base_disk_trimesh])
 
 shade_with_base.export('diffusion_shade.stl')
-shade_with_base.export('lamp_shade.stl')
-print("Saved shades with stability disk.")
+print("Saved shade with stability disk.")
 
 print("\nDone!")
