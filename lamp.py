@@ -528,8 +528,32 @@ shade_mesh = generate_revolved_mesh(
     wall_thickness=0,
     inner_profile_func=cylinder_shade_inner_profile
 )
-shade_mesh.export('diffusion_shade.stl')
-shade_mesh.export('lamp_shade.stl')
-print("Saved shades.")
+
+# Add a base disk to the shade for stability
+# This disk extends from center to the outer edge at z=0
+print("Adding stability disk to shade base...")
+base_disk_outer_radius = 31.5  # Slightly larger than the shade bottom (31mm)
+base_disk_thickness = 2.0  # 2mm thick disk
+
+base_disk = generate_brim_mesh(
+    inner_radius=0.1,  # Nearly solid (small center hole for manifold mesh)
+    outer_radius=base_disk_outer_radius,
+    thickness=base_disk_thickness,
+    num_radial=180,
+    z_offset=0
+)
+
+# Convert numpy-stl mesh to trimesh
+base_disk_trimesh = trimesh.Trimesh(
+    vertices=base_disk.vectors.reshape(-1, 3),
+    faces=np.arange(len(base_disk.vectors) * 3).reshape(-1, 3)
+)
+
+# Combine shade and base disk
+shade_with_base = trimesh.util.concatenate([shade_mesh, base_disk_trimesh])
+
+shade_with_base.export('diffusion_shade.stl')
+shade_with_base.export('lamp_shade.stl')
+print("Saved shades with stability disk.")
 
 print("\nDone!")
