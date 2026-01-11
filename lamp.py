@@ -568,122 +568,87 @@ def generate_lamp_base(socket_radius, output_filename, deboss_text=None, version
         )
         text_meshes.append(version_text_mesh)
 
-    # Add logo if provided
+    # Add simplified logo if requested
     if logo_svg:
         try:
-            print(f"Loading logo from: {logo_svg}")
+            print(f"Creating simplified Photoroom 'P' logo...")
 
-            # Load the SVG file as a 2D path
-            logo_path = trimesh.load_path(logo_svg)
-
-            # Scale the logo to appropriate size
-            logo_height = 7.0  # mm, similar to main text
-
-            # Get bounds of the logo
-            bounds = logo_path.bounds
-            logo_width = bounds[1][0] - bounds[0][0]
-            logo_path_height = bounds[1][1] - bounds[0][1]
-
-            # Scale to desired height
-            scale_factor = logo_height / logo_path_height
-            logo_path.apply_scale(scale_factor)
-
-            # Center the path at origin for easier manipulation
-            logo_path.apply_translation(-logo_path.centroid)
-
-            # Convert path to triangulated mesh, then extrude
+            # Create a simplified "P" logo using basic geometry
+            logo_height = 7.0  # mm
+            logo_width = 6.0  # mm
             extrusion_height = text_depth + 0.2
 
-            # Get discrete path representation
-            discrete_paths = logo_path.discrete
+            # Create the letter "P" using cylinder and box primitives
+            # Vertical stem
+            stem_width = 1.5
+            stem_height = logo_height
+            stem = trimesh.creation.box(
+                extents=[stem_width, extrusion_height, stem_height]
+            )
+            # Position stem
+            stem.apply_translation([0, 0, stem_height/2])
 
-            # Combine all paths into one mesh
-            logo_meshes = []
-            for path_vertices in discrete_paths:
-                # Get path coordinates
-                try:
-                    exterior_coords = np.array(path_vertices)
+            # Top circular part of "P"
+            top_radius = 2.5
+            top_center_height = stem_height * 0.7
 
-                    # Create a simple triangulation using triangle
-                    import triangle as tr
+            # Create the circular part using a cylinder
+            circle_outer = trimesh.creation.cylinder(
+                radius=top_radius,
+                height=extrusion_height,
+                sections=32
+            )
+            # Rotate to be vertical (along Y axis initially, rotate to Z)
+            from trimesh.transformations import rotation_matrix
+            circle_outer.apply_transform(rotation_matrix(np.pi/2, [1, 0, 0]))
+            circle_outer.apply_translation([top_radius, 0, top_center_height])
 
-                    # Prepare input for triangle
-                    segments = [[i, i+1] for i in range(len(exterior_coords)-1)]
-                    tri_input = {'vertices': exterior_coords[:, :2], 'segments': segments}
+            # Create inner hole
+            circle_inner = trimesh.creation.cylinder(
+                radius=top_radius - stem_width,
+                height=extrusion_height * 1.2,  # Slightly taller to ensure clean cut
+                sections=32
+            )
+            circle_inner.apply_transform(rotation_matrix(np.pi/2, [1, 0, 0]))
+            circle_inner.apply_translation([top_radius, 0, top_center_height])
 
-                    # Triangulate
-                    tri_output = tr.triangulate(tri_input, 'p')
+            # Combine stem and outer circle
+            p_shape = trimesh.util.concatenate([stem, circle_outer])
 
-                    # Get vertices and faces
-                    verts_2d = tri_output['vertices']
+            # Subtract inner circle (if manifold3d available, otherwise just use outer shape)
+            try:
+                p_shape_processed = p_shape.process(validate=True)
+                circle_inner_processed = circle_inner.process(validate=True)
+                logo_mesh_3d = p_shape_processed.difference(circle_inner_processed)
+                print("  Using boolean subtraction for clean 'P' shape")
+            except:
+                # Fallback: just use the combined shape
+                logo_mesh_3d = p_shape
+                print("  Using simplified 'P' shape (no hole)")
 
-                    # Create bottom and top layers
-                    verts_bottom = np.column_stack([verts_2d, np.zeros(len(verts_2d))])
-                    verts_top = np.column_stack([verts_2d, np.ones(len(verts_2d)) * extrusion_height])
+            # Position logo at the end of the circular text
+            logo_radius = COLLAR_RADIUS - (logo_height / 2.0) - 1.0
+            logo_angle = np.pi  # Position at back
 
-                    # Combine vertices
-                    all_verts = np.vstack([verts_bottom, verts_top])
+            # Calculate position
+            logo_x = logo_radius * np.cos(logo_angle)
+            logo_y = logo_radius * np.sin(logo_angle)
+            logo_z = 120.0 - text_depth
 
-                    # Get triangles
-                    triangles = tri_output['triangles']
+            # Rotate logo to align with circular path first (while at origin)
+            rotation_angle = logo_angle + np.pi/2  # Perpendicular to radius
+            rotation = rotation_matrix(rotation_angle, [0, 0, 1])
+            logo_mesh_3d.apply_transform(rotation)
 
-                    # Create faces
-                    faces = []
-                    n = len(verts_2d)
+            # Then translate to final position
+            logo_mesh_3d.apply_translation([logo_x, logo_y, logo_z])
 
-                    # Bottom faces
-                    for tri in triangles:
-                        faces.append([tri[0], tri[2], tri[1]])  # Reverse for correct normal
-
-                    # Top faces
-                    for tri in triangles:
-                        faces.append([tri[0]+n, tri[1]+n, tri[2]+n])
-
-                    # Side faces (connect edges)
-                    for seg in segments:
-                        v1, v2 = seg
-                        # Two triangles for each edge
-                        faces.append([v1, v2, v2+n])
-                        faces.append([v1, v2+n, v1+n])
-
-                    # Create mesh
-                    poly_mesh = trimesh.Trimesh(vertices=all_verts, faces=faces)
-                    logo_meshes.append(poly_mesh)
-
-                except Exception as polygon_error:
-                    print(f"  Warning: Skipping one polygon: {polygon_error}")
-                    continue
-
-            if logo_meshes:
-                # Combine all polygon meshes
-                logo_mesh_3d = trimesh.util.concatenate(logo_meshes)
-
-                # Position logo at the end of the circular text
-                logo_radius = COLLAR_RADIUS - (logo_height / 2.0) - 1.0
-                logo_angle = np.pi  # Position at back
-
-                # Calculate position
-                logo_x = logo_radius * np.cos(logo_angle)
-                logo_y = logo_radius * np.sin(logo_angle)
-                logo_z = 120.0 - text_depth
-
-                # Rotate logo to align with circular path first (while at origin)
-                from trimesh.transformations import rotation_matrix
-                rotation_angle = logo_angle + np.pi/2  # Perpendicular to radius
-                rotation = rotation_matrix(rotation_angle, [0, 0, 1])
-                logo_mesh_3d.apply_transform(rotation)
-
-                # Then translate to final position
-                logo_mesh_3d.apply_translation([logo_x, logo_y, logo_z])
-
-                text_meshes.append(logo_mesh_3d)
-                print(f"✓ Logo added to design")
-            else:
-                print("  No valid polygons found in SVG")
+            text_meshes.append(logo_mesh_3d)
+            print(f"✓ Simplified 'P' logo added to design")
 
         except Exception as e:
             import traceback
-            print(f"✗ Failed to load logo: {e}")
+            print(f"✗ Failed to create logo: {e}")
             traceback.print_exc()
             print("  Continuing without logo...")
 
@@ -738,7 +703,7 @@ generate_lamp_base(
     output_filename='functional_base.stl',
     deboss_text="Vibecoded with ❤️ and AI in Paris",
     version_text=version_string,
-    logo_svg=None  # TODO: Fix logo triangulation issue
+    logo_svg=True  # Simplified geometric 'P' logo
 )
 
 # 2. Generate E14 Base (25mm hole -> 12.5mm radius)
@@ -747,7 +712,7 @@ generate_lamp_base(
     output_filename='functional_base_e14.stl',
     deboss_text="Vibecoded with ❤️ and AI in Paris",
     version_text=version_string,
-    logo_svg=None  # TODO: Fix logo triangulation issue
+    logo_svg=True  # Simplified geometric 'P' logo
 )
 
 # 3. Generate the Shade (Update to return trimesh and save)
