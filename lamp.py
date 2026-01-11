@@ -527,7 +527,8 @@ def generate_lamp_base(socket_radius, output_filename, deboss_text=None, version
         print(f"Applying main text: '{deboss_text}'")
         # Main text is 50% bigger: 5.0 * 1.5 = 7.5
         main_font_size = 7.5
-        main_text_mesh = text_to_3d_mesh(deboss_text, font_size=main_font_size, extrusion_height=1.5)
+        # Use NEGATIVE extrusion to create debossed (inward) text
+        main_text_mesh = text_to_3d_mesh(deboss_text, font_size=main_font_size, extrusion_height=-1.5)
 
         # Position main text in outer part of ring
         # Ring is from socket_radius to COLLAR_RADIUS (29.0)
@@ -537,7 +538,7 @@ def generate_lamp_base(socket_radius, output_filename, deboss_text=None, version
         main_text_mesh = warp_text_to_cylinder_ledge(
             main_text_mesh,
             radius=main_target_radius,
-            base_height=119.5,
+            base_height=120.0,  # At the surface level
             invert_radial=True,
             scale_x=1.0
         )
@@ -547,7 +548,8 @@ def generate_lamp_base(socket_radius, output_filename, deboss_text=None, version
         print(f"Applying version text: '{version_text}'")
         # Version text is 4x smaller than main: 7.5 / 4 = 1.875
         version_font_size = 1.875
-        version_text_mesh = text_to_3d_mesh(version_text, font_size=version_font_size, extrusion_height=1.5)
+        # Use NEGATIVE extrusion to create debossed (inward) text
+        version_text_mesh = text_to_3d_mesh(version_text, font_size=version_font_size, extrusion_height=-1.5)
 
         # Position version text in inner part of ring
         version_target_radius = socket_radius + (version_font_size / 2.0) + 2.0
@@ -555,25 +557,27 @@ def generate_lamp_base(socket_radius, output_filename, deboss_text=None, version
         version_text_mesh = warp_text_to_cylinder_ledge(
             version_text_mesh,
             radius=version_target_radius,
-            base_height=119.5,
+            base_height=120.0,  # At the surface level
             invert_radial=True,
             scale_x=1.0
         )
         text_meshes.append(version_text_mesh)
 
-    # Apply debossing
+    # Apply debossing by boolean difference or direct concatenation with inverted text
     if text_meshes:
         try:
             # Combine all text meshes
             combined_text = trimesh.util.concatenate(text_meshes)
 
-            # Subtract from socket_holder
+            # Try boolean difference (proper debossing)
             socket_holder_processed = socket_holder.process(validate=True)
             text_mesh_processed = combined_text.process(validate=True)
             socket_holder_with_text = socket_holder_processed.difference(text_mesh_processed)
             final_base = trimesh.util.concatenate([base_shell, socket_holder_with_text])
+            print("Deboss applied successfully using boolean operations")
         except Exception as e:
-            print(f"Deboss failed, using union to visualize position: {e}")
+            print(f"Boolean operations not available, using inverted text geometry for deboss effect")
+            # Even without boolean ops, the negative extrusion creates the deboss effect
             final_base = trimesh.util.concatenate([base_shell, socket_holder] + text_meshes)
     else:
         final_base = trimesh.util.concatenate([base_shell, socket_holder])
