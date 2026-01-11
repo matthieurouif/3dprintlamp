@@ -9,6 +9,55 @@ if not hasattr(np, 'bool'):
 from stl import mesh
 import trimesh
 from text_generator import text_to_3d_mesh, warp_text_to_cylinder_ledge
+import json
+import hashlib
+import os
+
+# --- VERSION MANAGEMENT ---
+
+def get_file_hash(filepath, length=2):
+    """Get a short hash identifier from the file content."""
+    with open(filepath, 'rb') as f:
+        file_hash = hashlib.sha256(f.read()).hexdigest()
+    return file_hash[:length]
+
+def get_or_increment_version():
+    """
+    Manages version tracking with auto-increment and file hash.
+    Format: v0.1.N-XX where N increments and XX is file hash.
+    Returns: (version_string, version_dict)
+    """
+    version_file = 'version.json'
+    script_file = __file__
+
+    # Default version
+    default_version = {
+        'major': 0,
+        'minor': 1,
+        'patch': 0
+    }
+
+    # Load or create version file
+    if os.path.exists(version_file):
+        with open(version_file, 'r') as f:
+            version = json.load(f)
+    else:
+        version = default_version.copy()
+
+    # Increment patch version
+    version['patch'] += 1
+
+    # Get file hash for traceability
+    file_hash = get_file_hash(script_file, length=2)
+
+    # Create version string
+    version_string = f"v{version['major']}.{version['minor']}.{version['patch']}-{file_hash}"
+
+    # Save updated version
+    with open(version_file, 'w') as f:
+        json.dump(version, f, indent=2)
+
+    return version_string, version
 
 # --- HELPER FUNCTIONS ---
 
@@ -397,32 +446,34 @@ def cylinder_shade_inner_profile(z_norm):
 
 # --- REFINED BASE GENERATION ---
 
-def generate_lamp_base(socket_radius, output_filename, deboss_text=None):
+def generate_lamp_base(socket_radius, output_filename, deboss_text=None, version_text=None):
     """
-    Generates a lamp base with specified socket radius and optional debossed text.
+    Generates a lamp base with specified socket radius and optional debossed texts.
+    deboss_text: Main text (will be 50% bigger than before)
+    version_text: Small version text (4x smaller than main text)
     """
     print(f"Generating {output_filename} (Socket R={socket_radius})...")
-    
+
     # 1. Generate the Main Shell (Outer Body)
     # We use a slightly modified profile that stops exactly at the ledge height
     LEDGE_HEIGHT = BASE_HEIGHT - 12.0 # 108mm
-    
+
     def shell_profile(z_norm):
         # z_norm is relative to total height (120)
         # But we only want the bulbous part up to 108
         z = z_norm * BASE_HEIGHT
-        
+
         # Original logic shifted to fit 108
         z_rel = np.clip(z / LEDGE_HEIGHT, 0, 1)
         z_inverted = 1.0 - z_rel
         k = 0.5
         r_body_original = 35 + 40 * np.sin(np.power(z_inverted, k) * np.pi)
         r_body_base = r_body_original * 0.82857
-        
+
         # Transition to LEDGE_RADIUS at the top
         blend_top = np.power(z_rel, 8)
         r_bulbous = r_body_base * (1 - blend_top) + LEDGE_RADIUS * blend_top
-        
+
         return np.where(z > LEDGE_HEIGHT, COLLAR_RADIUS, r_bulbous)
 
     def shell_inner_profile(z_norm):
@@ -440,13 +491,13 @@ def generate_lamp_base(socket_radius, output_filename, deboss_text=None):
         inner_profile_func=shell_inner_profile,
         hole_mask_func=base_hole_mask
     )
-    
+
     # 2. Generate the Socket Holder (Ring)
     # Height: 22mm (from 98 to 120)
     # Top 12mm is the Collar (R=29)
     # Bottom 10mm is the extra extension (Thickness 10mm)
     HOLDER_HEIGHT = 22.0
-    
+
     def holder_outer_profile_truncated(z_norm):
         z = z_norm * HOLDER_HEIGHT
         # z in [0, 22]. 0 is bottom (Z=98), 22 is top (Z=120)
@@ -465,42 +516,65 @@ def generate_lamp_base(socket_radius, output_filename, deboss_text=None):
     )
     # Translate to top
     socket_holder.vertices[:, 2] += (BASE_HEIGHT - HOLDER_HEIGHT)
-    
+
     # 3. Combine and Deboss
     # Use concatenate instead of union to avoid boolean errors with non-manifold shell
-    
-    # Deboss text on the top disk (at Z=120)
+
+    # Deboss texts on the top disk (at Z=120)
+    text_meshes = []
+
     if deboss_text:
-        print(f"Applying deboss: '{deboss_text}'")
-        # Ring at top is from socket_radius to COLLAR_RADIUS (29.0)
-        # Center the text in this ring
-        font_size = 5.0
-        text_mesh = text_to_3d_mesh(deboss_text, font_size=font_size, extrusion_height=1.5)
-        
-        # Calculate radius to center the text
-        # If invert_radial=True, R = radius - Y_radial. 
-        # Range is [radius - font_size, radius]
-        # Center is radius - font_size/2
-        # We want radius - font_size/2 = (COLLAR_RADIUS + socket_radius) / 2
-        target_radius = (COLLAR_RADIUS + socket_radius) / 2.0 + (font_size / 2.0)
-        
-        text_mesh = warp_text_to_cylinder_ledge(
-            text_mesh, 
-            radius=target_radius,
-            base_height=119.5, # Slightly below surface to ensure intersection/cut
+        print(f"Applying main text: '{deboss_text}'")
+        # Main text is 50% bigger: 5.0 * 1.5 = 7.5
+        main_font_size = 7.5
+        main_text_mesh = text_to_3d_mesh(deboss_text, font_size=main_font_size, extrusion_height=1.5)
+
+        # Position main text in outer part of ring
+        # Ring is from socket_radius to COLLAR_RADIUS (29.0)
+        # Place main text closer to outer edge
+        main_target_radius = COLLAR_RADIUS - (main_font_size / 2.0) - 1.0
+
+        main_text_mesh = warp_text_to_cylinder_ledge(
+            main_text_mesh,
+            radius=main_target_radius,
+            base_height=119.5,
             invert_radial=True,
             scale_x=1.0
         )
-        
+        text_meshes.append(main_text_mesh)
+
+    if version_text:
+        print(f"Applying version text: '{version_text}'")
+        # Version text is 4x smaller than main: 7.5 / 4 = 1.875
+        version_font_size = 1.875
+        version_text_mesh = text_to_3d_mesh(version_text, font_size=version_font_size, extrusion_height=1.5)
+
+        # Position version text in inner part of ring
+        version_target_radius = socket_radius + (version_font_size / 2.0) + 2.0
+
+        version_text_mesh = warp_text_to_cylinder_ledge(
+            version_text_mesh,
+            radius=version_target_radius,
+            base_height=119.5,
+            invert_radial=True,
+            scale_x=1.0
+        )
+        text_meshes.append(version_text_mesh)
+
+    # Apply debossing
+    if text_meshes:
         try:
-            # Note: Subtract from socket_holder as it forms the top surface
+            # Combine all text meshes
+            combined_text = trimesh.util.concatenate(text_meshes)
+
+            # Subtract from socket_holder
             socket_holder_processed = socket_holder.process(validate=True)
-            text_mesh_processed = text_mesh.process(validate=True)
+            text_mesh_processed = combined_text.process(validate=True)
             socket_holder_with_text = socket_holder_processed.difference(text_mesh_processed)
             final_base = trimesh.util.concatenate([base_shell, socket_holder_with_text])
         except Exception as e:
             print(f"Deboss failed, using union to visualize position: {e}")
-            final_base = trimesh.util.concatenate([base_shell, socket_holder, text_mesh])
+            final_base = trimesh.util.concatenate([base_shell, socket_holder] + text_meshes)
     else:
         final_base = trimesh.util.concatenate([base_shell, socket_holder])
 
@@ -510,11 +584,25 @@ def generate_lamp_base(socket_radius, output_filename, deboss_text=None):
 
 # --- MAIN EXECUTION ---
 
+# Get version for this run
+version_string, version_info = get_or_increment_version()
+print(f"\n=== Generating Lamp Parts - {version_string} ===\n")
+
 # 1. Generate G9 Base (18mm hole -> 9mm radius)
-generate_lamp_base(9.0, 'functional_base.stl', deboss_text="Made with ❤️ in Paris")
+generate_lamp_base(
+    socket_radius=9.0,
+    output_filename='functional_base.stl',
+    deboss_text="Made with ❤️ in Paris",
+    version_text=version_string
+)
 
 # 2. Generate E14 Base (25mm hole -> 12.5mm radius)
-generate_lamp_base(12.5, 'functional_base_e14.stl', deboss_text="Made with ❤️ in Paris")
+generate_lamp_base(
+    socket_radius=12.5,
+    output_filename='functional_base_e14.stl',
+    deboss_text="Made with ❤️ in Paris",
+    version_text=version_string
+)
 
 # 3. Generate the Shade (Update to return trimesh and save)
 print("\nGenerating Shade...")
