@@ -446,11 +446,12 @@ def cylinder_shade_inner_profile(z_norm):
 
 # --- REFINED BASE GENERATION ---
 
-def generate_lamp_base(socket_radius, output_filename, deboss_text=None, version_text=None):
+def generate_lamp_base(socket_radius, output_filename, deboss_text=None, version_text=None, logo_svg=None):
     """
-    Generates a lamp base with specified socket radius and optional debossed texts.
+    Generates a lamp base with specified socket radius and optional debossed texts and logo.
     deboss_text: Main text (will be 50% bigger than before)
     version_text: Small version text (4x smaller than main text)
+    logo_svg: Path to SVG file for logo to add at end of circular text
     """
     print(f"Generating {output_filename} (Socket R={socket_radius})...")
 
@@ -567,6 +568,125 @@ def generate_lamp_base(socket_radius, output_filename, deboss_text=None, version
         )
         text_meshes.append(version_text_mesh)
 
+    # Add logo if provided
+    if logo_svg:
+        try:
+            print(f"Loading logo from: {logo_svg}")
+
+            # Load the SVG file as a 2D path
+            logo_path = trimesh.load_path(logo_svg)
+
+            # Scale the logo to appropriate size
+            logo_height = 7.0  # mm, similar to main text
+
+            # Get bounds of the logo
+            bounds = logo_path.bounds
+            logo_width = bounds[1][0] - bounds[0][0]
+            logo_path_height = bounds[1][1] - bounds[0][1]
+
+            # Scale to desired height
+            scale_factor = logo_height / logo_path_height
+            logo_path.apply_scale(scale_factor)
+
+            # Center the path at origin for easier manipulation
+            logo_path.apply_translation(-logo_path.centroid)
+
+            # Convert path to triangulated mesh, then extrude
+            extrusion_height = text_depth + 0.2
+
+            # Get discrete path representation
+            discrete_paths = logo_path.discrete
+
+            # Combine all paths into one mesh
+            logo_meshes = []
+            for path_vertices in discrete_paths:
+                # Get path coordinates
+                try:
+                    exterior_coords = np.array(path_vertices)
+
+                    # Create a simple triangulation using triangle
+                    import triangle as tr
+
+                    # Prepare input for triangle
+                    segments = [[i, i+1] for i in range(len(exterior_coords)-1)]
+                    tri_input = {'vertices': exterior_coords[:, :2], 'segments': segments}
+
+                    # Triangulate
+                    tri_output = tr.triangulate(tri_input, 'p')
+
+                    # Get vertices and faces
+                    verts_2d = tri_output['vertices']
+
+                    # Create bottom and top layers
+                    verts_bottom = np.column_stack([verts_2d, np.zeros(len(verts_2d))])
+                    verts_top = np.column_stack([verts_2d, np.ones(len(verts_2d)) * extrusion_height])
+
+                    # Combine vertices
+                    all_verts = np.vstack([verts_bottom, verts_top])
+
+                    # Get triangles
+                    triangles = tri_output['triangles']
+
+                    # Create faces
+                    faces = []
+                    n = len(verts_2d)
+
+                    # Bottom faces
+                    for tri in triangles:
+                        faces.append([tri[0], tri[2], tri[1]])  # Reverse for correct normal
+
+                    # Top faces
+                    for tri in triangles:
+                        faces.append([tri[0]+n, tri[1]+n, tri[2]+n])
+
+                    # Side faces (connect edges)
+                    for seg in segments:
+                        v1, v2 = seg
+                        # Two triangles for each edge
+                        faces.append([v1, v2, v2+n])
+                        faces.append([v1, v2+n, v1+n])
+
+                    # Create mesh
+                    poly_mesh = trimesh.Trimesh(vertices=all_verts, faces=faces)
+                    logo_meshes.append(poly_mesh)
+
+                except Exception as polygon_error:
+                    print(f"  Warning: Skipping one polygon: {polygon_error}")
+                    continue
+
+            if logo_meshes:
+                # Combine all polygon meshes
+                logo_mesh_3d = trimesh.util.concatenate(logo_meshes)
+
+                # Position logo at the end of the circular text
+                logo_radius = COLLAR_RADIUS - (logo_height / 2.0) - 1.0
+                logo_angle = np.pi  # Position at back
+
+                # Calculate position
+                logo_x = logo_radius * np.cos(logo_angle)
+                logo_y = logo_radius * np.sin(logo_angle)
+                logo_z = 120.0 - text_depth
+
+                # Rotate logo to align with circular path first (while at origin)
+                from trimesh.transformations import rotation_matrix
+                rotation_angle = logo_angle + np.pi/2  # Perpendicular to radius
+                rotation = rotation_matrix(rotation_angle, [0, 0, 1])
+                logo_mesh_3d.apply_transform(rotation)
+
+                # Then translate to final position
+                logo_mesh_3d.apply_translation([logo_x, logo_y, logo_z])
+
+                text_meshes.append(logo_mesh_3d)
+                print(f"✓ Logo added to design")
+            else:
+                print("  No valid polygons found in SVG")
+
+        except Exception as e:
+            import traceback
+            print(f"✗ Failed to load logo: {e}")
+            traceback.print_exc()
+            print("  Continuing without logo...")
+
     # Apply debossing using boolean subtraction
     if text_meshes:
         try:
@@ -616,16 +736,18 @@ print(f"\n=== Generating Lamp Parts - {version_string} ===\n")
 generate_lamp_base(
     socket_radius=9.0,
     output_filename='functional_base.stl',
-    deboss_text="Made with ❤️ in Paris",
-    version_text=version_string
+    deboss_text="Vibecoded with ❤️ and AI in Paris",
+    version_text=version_string,
+    logo_svg=None  # TODO: Fix logo triangulation issue
 )
 
 # 2. Generate E14 Base (25mm hole -> 12.5mm radius)
 generate_lamp_base(
     socket_radius=12.5,
     output_filename='functional_base_e14.stl',
-    deboss_text="Made with ❤️ in Paris",
-    version_text=version_string
+    deboss_text="Vibecoded with ❤️ and AI in Paris",
+    version_text=version_string,
+    logo_svg=None  # TODO: Fix logo triangulation issue
 )
 
 # 3. Generate the Shade (Update to return trimesh and save)
