@@ -701,7 +701,7 @@ print(f"\n=== Generating Lamp Parts - {version_string} ===\n")
 generate_lamp_base(
     socket_radius=9.0,
     output_filename='functional_base.stl',
-    deboss_text="Vibecoded with ❤️ and AI in Paris",
+    deboss_text="Made with ❤️ & AI in Paris",
     version_text=version_string,
     logo_svg=True  # Simplified geometric 'P' logo
 )
@@ -710,7 +710,7 @@ generate_lamp_base(
 generate_lamp_base(
     socket_radius=12.5,
     output_filename='functional_base_e14.stl',
-    deboss_text="Vibecoded with ❤️ and AI in Paris",
+    deboss_text="Made with ❤️ & AI in Paris",
     version_text=version_string,
     logo_svg=True  # Simplified geometric 'P' logo
 )
