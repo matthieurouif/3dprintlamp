@@ -548,8 +548,9 @@ def generate_lamp_base(socket_radius, output_filename, deboss_text=None, version
 
     if version_text:
         print(f"Applying version text: '{version_text}'")
-        # Version text is 4x smaller than main: 7.5 / 4 = 1.875
-        version_font_size = 1.875
+        # Version text was 4x smaller (1.875), now 50% bigger: 1.875 * 1.5 = 2.8125
+        # This is about 2.67x smaller than main text (7.5 / 2.8125 ≈ 2.67)
+        version_font_size = 2.8125
         # Create text volume for subtraction
         text_depth = 1.0
         version_text_mesh = text_to_3d_mesh(version_text, font_size=version_font_size, extrusion_height=text_depth + 0.2)
