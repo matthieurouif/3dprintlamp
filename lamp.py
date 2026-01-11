@@ -520,15 +520,17 @@ def generate_lamp_base(socket_radius, output_filename, deboss_text=None, version
     # 3. Combine and Deboss
     # Use concatenate instead of union to avoid boolean errors with non-manifold shell
 
-    # Deboss texts on the top disk (at Z=120)
+    # Add debossed text on the top disk (at Z=120)
+    # Use boolean subtraction to create true debossed text
     text_meshes = []
 
     if deboss_text:
         print(f"Applying main text: '{deboss_text}'")
         # Main text is 50% bigger: 5.0 * 1.5 = 7.5
         main_font_size = 7.5
-        # Use NEGATIVE extrusion to create debossed (inward) text
-        main_text_mesh = text_to_3d_mesh(deboss_text, font_size=main_font_size, extrusion_height=-1.5)
+        # Create text volume for subtraction - extends from slightly below to above surface
+        text_depth = 1.0  # How deep the deboss goes
+        main_text_mesh = text_to_3d_mesh(deboss_text, font_size=main_font_size, extrusion_height=text_depth + 0.2)
 
         # Position main text in outer part of ring
         # Ring is from socket_radius to COLLAR_RADIUS (29.0)
@@ -538,7 +540,7 @@ def generate_lamp_base(socket_radius, output_filename, deboss_text=None, version
         main_text_mesh = warp_text_to_cylinder_ledge(
             main_text_mesh,
             radius=main_target_radius,
-            base_height=120.0,  # At the surface level
+            base_height=120.0 - text_depth,  # Start below surface, extend through it
             invert_radial=True,
             scale_x=1.0
         )
@@ -548,8 +550,9 @@ def generate_lamp_base(socket_radius, output_filename, deboss_text=None, version
         print(f"Applying version text: '{version_text}'")
         # Version text is 4x smaller than main: 7.5 / 4 = 1.875
         version_font_size = 1.875
-        # Use NEGATIVE extrusion to create debossed (inward) text
-        version_text_mesh = text_to_3d_mesh(version_text, font_size=version_font_size, extrusion_height=-1.5)
+        # Create text volume for subtraction
+        text_depth = 1.0
+        version_text_mesh = text_to_3d_mesh(version_text, font_size=version_font_size, extrusion_height=text_depth + 0.2)
 
         # Position version text in inner part of ring
         version_target_radius = socket_radius + (version_font_size / 2.0) + 2.0
@@ -557,27 +560,43 @@ def generate_lamp_base(socket_radius, output_filename, deboss_text=None, version
         version_text_mesh = warp_text_to_cylinder_ledge(
             version_text_mesh,
             radius=version_target_radius,
-            base_height=120.0,  # At the surface level
+            base_height=120.0 - text_depth,  # Start below surface, extend through it
             invert_radial=True,
             scale_x=1.0
         )
         text_meshes.append(version_text_mesh)
 
-    # Apply debossing by boolean difference or direct concatenation with inverted text
+    # Apply debossing using boolean subtraction
     if text_meshes:
         try:
+            print("Applying debossed text using boolean subtraction...")
             # Combine all text meshes
             combined_text = trimesh.util.concatenate(text_meshes)
 
-            # Try boolean difference (proper debossing)
-            socket_holder_processed = socket_holder.process(validate=True)
-            text_mesh_processed = combined_text.process(validate=True)
-            socket_holder_with_text = socket_holder_processed.difference(text_mesh_processed)
-            final_base = trimesh.util.concatenate([base_shell, socket_holder_with_text])
-            print("Deboss applied successfully using boolean operations")
+            # First combine base and socket holder
+            temp_base = trimesh.util.concatenate([base_shell, socket_holder])
+
+            # Process meshes to make them valid watertight volumes
+            print("  Processing meshes for boolean operations...")
+            temp_base_processed = temp_base.process(validate=True)
+            combined_text_processed = combined_text.process(validate=True)
+
+            # Check if both are valid volumes
+            if not temp_base_processed.is_volume:
+                print(f"  Warning: Base is not a valid volume (watertight: {temp_base_processed.is_watertight})")
+                temp_base_processed.fill_holes()
+
+            if not combined_text_processed.is_volume:
+                print(f"  Warning: Text is not a valid volume (watertight: {combined_text_processed.is_watertight})")
+                combined_text_processed.fill_holes()
+
+            # Subtract text from the combined base (trimesh will use manifold3d if available)
+            final_base = temp_base_processed.difference(combined_text_processed)
+            print("✓ Text successfully debossed")
         except Exception as e:
-            print(f"Boolean operations not available, using inverted text geometry for deboss effect")
-            # Even without boolean ops, the negative extrusion creates the deboss effect
+            print(f"✗ Boolean operations failed: {e}")
+            print("  Falling back to raised text (print upside down for deboss effect)")
+            # Fallback: just add raised text
             final_base = trimesh.util.concatenate([base_shell, socket_holder] + text_meshes)
     else:
         final_base = trimesh.util.concatenate([base_shell, socket_holder])
