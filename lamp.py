@@ -506,7 +506,16 @@ def generate_lamp_base(socket_radius, output_filename, deboss_text=None, version
         return np.where(z > 10, COLLAR_RADIUS, socket_radius + 10.0)
 
     def holder_inner_profile_truncated(z_norm):
-        return np.full_like(z_norm, socket_radius)
+        # Stepped socket hole for E14:
+        # Bottom 5mm: 25mm diameter (12.5mm radius)
+        # Top 17mm: 27mm diameter (13.5mm radius)
+        z = z_norm * HOLDER_HEIGHT
+        # If z <= 5mm, use socket_radius (12.5mm for E14, 9mm for G9)
+        # If z > 5mm, use larger radius (13.5mm for E14, 9mm for G9)
+        if socket_radius == 12.5:  # E14 base
+            return np.where(z <= 5.0, 12.5, 13.5)
+        else:  # G9 base - keep original radius
+            return np.full_like(z_norm, socket_radius)
 
     socket_holder = generate_revolved_mesh(
         height=HOLDER_HEIGHT,
