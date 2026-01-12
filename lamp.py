@@ -729,13 +729,13 @@ shade_mesh = generate_revolved_mesh(
 )
 
 # Add a base disk to the shade for stability
-# This disk extends from center to the outer edge at z=0
+# Solid 2cm radius disk at the base
 print("Adding stability disk to shade base...")
-base_disk_outer_radius = 31.5  # Slightly larger than the shade bottom (31mm)
+base_disk_outer_radius = 20.0  # 2cm radius for stability
 base_disk_thickness = 2.0  # 2mm thick disk
 
 base_disk = generate_brim_mesh(
-    inner_radius=0.1,  # Nearly solid (small center hole for manifold mesh)
+    inner_radius=0.0,  # Completely solid (no hole)
     outer_radius=base_disk_outer_radius,
     thickness=base_disk_thickness,
     num_radial=180,
